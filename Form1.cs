@@ -177,9 +177,10 @@ namespace ToMauScraper
                 AutoScroll = true,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = true,
-                Padding = new Padding(12, 14, 12, 12),
+                Padding = new Padding(12, 14, 12, 20),
                 BackColor = Color.FromArgb(222, 229, 240)
             };
+            flowPanel.Resize += (s, e) => RecalculateScrollHeight();
             this.Controls.Add(flowPanel);
         }
 
@@ -445,6 +446,28 @@ namespace ToMauScraper
 
                 await Task.Delay(30); // throttle
             }
+
+            RecalculateScrollHeight();
+        }
+
+        // ─── Tính chiều cao cuộn thủ công ───────────────────────────────────────
+        // FlowLayoutPanel.AutoScroll tự tính chiều cao cuộn không đáng tin cậy khi
+        // Padding/Margin không đồng nhất (đã gặp bug bỏ qua Padding.Top, và bug cắt
+        // mất hàng cuối) — nên tự tính rows × row-height và set AutoScrollMinSize
+        // trực tiếp, không phụ thuộc cơ chế tự động của control.
+        private const int CardOuterWidth = 170 + 8 + 8;   // Size.Width + Margin trái/phải
+        private const int CardOuterHeight = 210 + 60 + 8; // Size.Height + Margin trên/dưới
+
+        private void RecalculateScrollHeight()
+        {
+            if (_currentItems.Count == 0) return;
+
+            int usableWidth = Math.Max(CardOuterWidth, flowPanel.ClientSize.Width - flowPanel.Padding.Horizontal);
+            int columns = Math.Max(1, usableWidth / CardOuterWidth);
+            int rows = (int)Math.Ceiling(_currentItems.Count / (double)columns);
+            int neededHeight = rows * CardOuterHeight + flowPanel.Padding.Vertical + 20; // đệm an toàn
+
+            flowPanel.AutoScrollMinSize = new Size(0, neededHeight);
         }
 
         // ─── Card builder ─────────────────────────────────────────────────────
