@@ -277,6 +277,22 @@ namespace ToMauScraper
                     SaveCache(kw, _currentItems, categoryCount);
                 }
 
+                // Cảnh báo nếu quá nhiều kết quả — hàng nghìn card cùng lúc có thể làm
+                // FlowLayoutPanel nghẽn UI thread nặng (đã test thực tế: 2000+ kết quả
+                // khiến app gần như treo vài phút).
+                const int LargeResultWarningThreshold = 150;
+                if (_currentItems.Count > LargeResultWarningThreshold)
+                {
+                    var confirm = MessageBox.Show(
+                        $"Tìm thấy {_currentItems.Count} tranh — khá nhiều, có thể làm app chậm/đơ vài phút khi tải.\n\n" +
+                        "Bấm \"Yes\" để tải toàn bộ, \"No\" để chỉ hiển thị " +
+                        $"{LargeResultWarningThreshold} tranh đầu tiên.",
+                        "Kết quả rất nhiều", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+                    if (confirm == DialogResult.No)
+                        _currentItems = _currentItems.Take(LargeResultWarningThreshold).ToList();
+                }
+
                 // 3. Render thumbnails
                 SetStatus($"Đang tải {_currentItems.Count} thumbnail...", true);
                 progressBar.Maximum = _currentItems.Count;
