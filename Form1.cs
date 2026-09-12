@@ -599,6 +599,9 @@ namespace ToMauScraper
 
                 using var printDoc = new PrintDocument();
                 printDoc.DocumentName = item.Name;
+                // Mặc định in 1 mặt — tránh máy in tự quét/in 2 mặt gây chậm
+                if (printDoc.PrinterSettings.CanDuplex)
+                    printDoc.PrinterSettings.Duplex = Duplex.Simplex;
                 printDoc.PrintPage += (s, e) =>
                 {
                     var bounds = e.MarginBounds;
