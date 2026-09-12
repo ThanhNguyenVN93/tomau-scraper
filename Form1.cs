@@ -19,8 +19,13 @@ namespace ToMauScraper
 {
     public partial class Form1 : Form
     {
+        private const string AppVersion = "1.0.6";
+        private const string GithubRepo = "ThanhNguyenVN93/tomau-scraper";
+
         private static readonly HttpClient _http = new HttpClient();
         private List<TrainhItem> _currentItems = new List<TrainhItem>();
+        private AppSettings _settings;
+        private AutoCompleteStringCollection _recentSearchSource;
 
         // ── Controls ──────────────────────────────────────────────────────────
         private TextBox txtSearch;
@@ -36,10 +41,17 @@ namespace ToMauScraper
         {
             InitializeComponent();
             SetupHttp();
+            _settings = LoadSettings();
             BuildUI();
             // Không set AcceptButton — tránh Form nuốt Enter trước IME
             this.KeyPreview = false;
-            _ = CheckConnectivityOnStartupAsync();
+            _ = RunStartupChecksAsync();
+        }
+
+        private async Task RunStartupChecksAsync()
+        {
+            await CheckConnectivityOnStartupAsync();
+            await CheckForUpdatesAsync();
         }
 
         // ─── Kiểm tra kết nối khi mở form ───────────────────────────────────────
@@ -74,6 +86,56 @@ namespace ToMauScraper
             catch (Exception ex)
             {
                 SetStatus(DescribeNetworkError(ex), false);
+            }
+        }
+
+        // ─── Kiểm tra bản cập nhật (chỉ báo + link, không tự tải/cài) ──────────
+        // manual=true (người dùng tự bấm) sẽ luôn phản hồi rõ ràng (kể cả khi đã mới
+        // nhất hoặc lỗi mạng); manual=false (tự động lúc mở app) im lặng nếu lỗi.
+        private async Task CheckForUpdatesAsync(bool manual = false)
+        {
+            try
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get,
+                    $"https://api.github.com/repos/{GithubRepo}/releases/latest");
+                req.Headers.Add("Accept", "application/vnd.github+json");
+                using var resp = await _http.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    if (manual) MessageBox.Show("Không kiểm tra được bản cập nhật (không kết nối được GitHub).",
+                        "Kiểm tra cập nhật", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                string json = await resp.Content.ReadAsStringAsync();
+                var tagMatch = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"v?([\\d.]+)\"");
+                if (!tagMatch.Success) return;
+
+                string latestVersion = tagMatch.Groups[1].Value;
+                var urlMatch = Regex.Match(json, "\"html_url\"\\s*:\\s*\"([^\"]+)\"");
+                string releaseUrl = urlMatch.Success ? urlMatch.Groups[1].Value :
+                    $"https://github.com/{GithubRepo}/releases/latest";
+
+                if (new Version(latestVersion) > new Version(AppVersion))
+                {
+                    var choice = MessageBox.Show(
+                        $"Đã có phiên bản mới v{latestVersion} (đang dùng v{AppVersion}).\n\n" +
+                        "Bấm \"Yes\" để mở trang tải về.",
+                        "Có bản cập nhật", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+
+                    if (choice == DialogResult.Yes)
+                        Process.Start(new ProcessStartInfo(releaseUrl) { UseShellExecute = true });
+                }
+                else if (manual)
+                {
+                    MessageBox.Show($"Bạn đang dùng phiên bản mới nhất (v{AppVersion}).",
+                        "Kiểm tra cập nhật", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch
+            {
+                if (manual) MessageBox.Show("Không kiểm tra được bản cập nhật — kiểm tra kết nối mạng.",
+                    "Kiểm tra cập nhật", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -120,6 +182,13 @@ namespace ToMauScraper
                 ImeMode = ImeMode.NoControl,
                 TabStop = false // tránh form tự focus vào đây lúc load, xóa mất placeholder
             };
+
+            // Gợi ý lịch sử tìm kiếm — dùng CustomSource nên không đụng tới bộ gõ IME
+            _recentSearchSource = new AutoCompleteStringCollection();
+            _recentSearchSource.AddRange(_settings.RecentSearches.ToArray());
+            txtSearch.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+            txtSearch.AutoCompleteSource = AutoCompleteSource.CustomSource;
+            txtSearch.AutoCompleteCustomSource = _recentSearchSource;
 
             // Placeholder dùng bool — không check ForeColor, tránh can thiệp IME tiếng Việt
             txtSearch.GotFocus += (s, e) =>
@@ -204,7 +273,17 @@ namespace ToMauScraper
             var statusPanel = new Panel { Dock = DockStyle.Bottom, Height = 28, BackColor = Color.FromArgb(236, 240, 241) };
             progressBar = new ProgressBar { Location = new Point(10, 5), Size = new Size(200, 18), Visible = false };
             lblStatus = new Label { Location = new Point(220, 6), AutoSize = true, ForeColor = Color.FromArgb(52, 73, 94) };
-            statusPanel.Controls.AddRange(new Control[] { progressBar, lblStatus });
+            var lnkCheckUpdate = new LinkLabel
+            {
+                Text = "Kiểm tra cập nhật  ",
+                AutoSize = true,
+                Dock = DockStyle.Right,
+                TextAlign = ContentAlignment.MiddleRight,
+                Padding = new Padding(0, 6, 12, 0),
+                LinkColor = Color.FromArgb(41, 182, 246)
+            };
+            lnkCheckUpdate.Click += async (s, e) => await CheckForUpdatesAsync(manual: true);
+            statusPanel.Controls.AddRange(new Control[] { progressBar, lblStatus, lnkCheckUpdate });
             this.Controls.Add(statusPanel);
 
             // Flow panel — Dock.Fill tự tính sau khi Top+Bottom đã dock
@@ -342,6 +421,7 @@ namespace ToMauScraper
                 btnDownloadAll.Enabled = _currentItems.Count > 0;
                 string cacheTag = cached != null ? " (cache)" : "";
                 SetStatus($"✔ Hiển thị {_currentItems.Count} tranh từ {categoryCount} chủ đề{cacheTag}", false);
+                AddToRecentSearches(kw);
             }
             catch (Exception ex)
             {
@@ -588,8 +668,8 @@ namespace ToMauScraper
             btnPrint.Click += async (s, e) => await PrintItemAsync(item);
             card.Controls.Add(btnPrint);
 
-            // Click card = open in browser
-            pb.Click += (s, e) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(item.PageUrl) { UseShellExecute = true });
+            // Click ảnh = xem trước cỡ lớn ngay trong app
+            pb.Click += (s, e) => ShowImagePreview(item);
 
             return card;
         }
@@ -608,9 +688,69 @@ namespace ToMauScraper
         private async Task DownloadSingleAsync(TrainhItem item)
         {
             using var dlg = new FolderBrowserDialog { Description = "Chọn thư mục lưu ảnh" };
+            if (!string.IsNullOrEmpty(_settings.LastDownloadFolder) && Directory.Exists(_settings.LastDownloadFolder))
+                dlg.SelectedPath = _settings.LastDownloadFolder;
             if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            _settings.LastDownloadFolder = dlg.SelectedPath;
+            SaveSettings(_settings);
+
             await DownloadItemAsync(item, dlg.SelectedPath);
             SetStatus($"✔ Đã tải: {item.Name}", false);
+        }
+
+        // ─── Xem trước ảnh cỡ lớn ngay trong app ────────────────────────────────
+        private async void ShowImagePreview(TrainhItem item)
+        {
+            using var previewForm = new Form
+            {
+                Text = item.Name,
+                Size = new Size(700, 750),
+                StartPosition = FormStartPosition.CenterParent,
+                Icon = this.Icon,
+                MinimumSize = new Size(400, 400)
+            };
+
+            var pbFull = new PictureBox
+            {
+                Dock = DockStyle.Fill,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                BackColor = Color.Black,
+                Image = item.Thumbnail // hiện thumbnail nén trước cho nhanh, thay full-res khi tải xong
+            };
+
+            var btnOpenPage = new Button
+            {
+                Text = "🌐 Mở trang gốc",
+                Dock = DockStyle.Bottom,
+                Height = 34,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(41, 182, 246),
+                ForeColor = Color.White
+            };
+            btnOpenPage.FlatAppearance.BorderSize = 0;
+            btnOpenPage.Click += (s, e) => Process.Start(new ProcessStartInfo(item.PageUrl) { UseShellExecute = true });
+
+            previewForm.Controls.Add(pbFull);
+            previewForm.Controls.Add(btnOpenPage);
+
+            previewForm.Shown += async (s, e) =>
+            {
+                try
+                {
+                    string imgUrl = await GetFullResImageUrl(item) ?? item.ThumbnailUrl;
+                    var bytes = await DownloadImageBytesAsync(imgUrl, item.PageUrl)
+                                ?? await DownloadImageBytesAsync(item.ThumbnailUrl, item.PageUrl);
+                    if (bytes == null || previewForm.IsDisposed) return;
+
+                    using var ms = new MemoryStream(bytes);
+                    using var img = Image.FromStream(ms);
+                    pbFull.Image = new Bitmap(img);
+                }
+                catch { /* giữ nguyên thumbnail nếu tải full-res lỗi */ }
+            };
+
+            previewForm.ShowDialog(this);
         }
 
         // ─── In trực tiếp ──────────────────────────────────────────────────────
@@ -670,7 +810,12 @@ namespace ToMauScraper
         private async void BtnDownloadAll_Click(object sender, EventArgs e)
         {
             using var dlg = new FolderBrowserDialog { Description = "Chọn thư mục lưu tất cả ảnh" };
+            if (!string.IsNullOrEmpty(_settings.LastDownloadFolder) && Directory.Exists(_settings.LastDownloadFolder))
+                dlg.SelectedPath = _settings.LastDownloadFolder;
             if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            _settings.LastDownloadFolder = dlg.SelectedPath;
+            SaveSettings(_settings);
 
             btnDownloadAll.Enabled = false;
             btnSearch.Enabled = false;
@@ -838,6 +983,50 @@ namespace ToMauScraper
             return resized;
         }
 
+        // ─── Cài đặt app (thư mục tải về gần nhất, lịch sử tìm kiếm) ───────────
+        private static string SettingsPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ToMauScraper", "settings.json");
+
+        private static AppSettings LoadSettings()
+        {
+            try
+            {
+                if (!File.Exists(SettingsPath)) return new AppSettings();
+                using var fs = File.OpenRead(SettingsPath);
+                var serializer = new DataContractJsonSerializer(typeof(AppSettings));
+                return (AppSettings)serializer.ReadObject(fs) ?? new AppSettings();
+            }
+            catch
+            {
+                return new AppSettings();
+            }
+        }
+
+        private static void SaveSettings(AppSettings settings)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath));
+                using var fs = File.Create(SettingsPath);
+                var serializer = new DataContractJsonSerializer(typeof(AppSettings));
+                serializer.WriteObject(fs, settings);
+            }
+            catch { /* cài đặt lỗi thì bỏ qua, không ảnh hưởng chức năng chính */ }
+        }
+
+        private void AddToRecentSearches(string kw)
+        {
+            _settings.RecentSearches.RemoveAll(s => s.Equals(kw, StringComparison.OrdinalIgnoreCase));
+            _settings.RecentSearches.Insert(0, kw);
+            if (_settings.RecentSearches.Count > 10)
+                _settings.RecentSearches = _settings.RecentSearches.Take(10).ToList();
+            SaveSettings(_settings);
+
+            _recentSearchSource.Clear();
+            _recentSearchSource.AddRange(_settings.RecentSearches.ToArray());
+        }
+
         // ─── Cache tìm kiếm ra file (JSON, %LocalAppData%\ToMauScraper\cache) ──
         private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
 
@@ -925,6 +1114,14 @@ namespace ToMauScraper
         public string PageUrl { get; set; }
         public string ThumbnailUrl { get; set; }
         public Bitmap Thumbnail { get; set; }
+    }
+
+    // ─── Cài đặt app lưu ra file (JSON) ─────────────────────────────────────────
+    [DataContract]
+    public class AppSettings
+    {
+        [DataMember] public string LastDownloadFolder { get; set; }
+        [DataMember] public List<string> RecentSearches { get; set; } = new List<string>();
     }
 
     // ─── DTO cho cache file (JSON) — không chứa Bitmap ─────────────────────────

@@ -13,6 +13,13 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
+    <Version>1.0.6</Version>
+    <FileVersion>1.0.6.0</FileVersion>
+    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <Product>ToMau.vn Scraper</Product>
+    <AssemblyTitle>ToMau.vn Scraper</AssemblyTitle>
+    <Description>Tool tìm kiếm, xem trước, in và tải tranh tô màu từ tomau.vn</Description>
+    <Copyright>Copyright © 2026 ThanhNguyenVN93</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
