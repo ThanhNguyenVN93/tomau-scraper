@@ -39,6 +39,42 @@ namespace ToMauScraper
             BuildUI();
             // Không set AcceptButton — tránh Form nuốt Enter trước IME
             this.KeyPreview = false;
+            _ = CheckConnectivityOnStartupAsync();
+        }
+
+        // ─── Kiểm tra kết nối khi mở form ───────────────────────────────────────
+        private async Task CheckConnectivityOnStartupAsync()
+        {
+            SetStatus("Đang kiểm tra kết nối tới tomau.vn...", true);
+            var checkTask = _http.GetAsync("https://tomau.vn/", HttpCompletionOption.ResponseHeadersRead);
+
+            try
+            {
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(8));
+                if (await Task.WhenAny(checkTask, timeoutTask) == timeoutTask)
+                {
+                    var choice = MessageBox.Show(
+                        "Kết nối tới tomau.vn đang mất nhiều thời gian hơn bình thường.\n\n" +
+                        "Bấm \"Yes\" để tiếp tục đợi, \"No\" để hủy (bạn vẫn có thể tìm kiếm bình thường sau).",
+                        "Kết nối chậm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+                    if (choice == DialogResult.No)
+                    {
+                        SetStatus("Đã hủy kiểm tra kết nối.", false);
+                        _ = checkTask.ContinueWith(t => { }, TaskScheduler.Default); // tránh unobserved exception
+                        return;
+                    }
+                }
+
+                using var response = await checkTask;
+                SetStatus(response.IsSuccessStatusCode
+                    ? "✔ Kết nối tomau.vn ổn định."
+                    : $"⚠ tomau.vn phản hồi bất thường (HTTP {(int)response.StatusCode}).", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus(DescribeNetworkError(ex), false);
+            }
         }
 
         // ─── HTTP Setup ───────────────────────────────────────────────────────
