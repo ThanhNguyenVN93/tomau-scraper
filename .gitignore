@@ -1,0 +1,16 @@
+# Build output
+bin/
+obj/
+*.zip
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Rider / JetBrains
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store
