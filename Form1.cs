@@ -117,7 +117,8 @@ namespace ToMauScraper
                 Font = new Font("Segoe UI", 10f),
                 Text = _placeholder,
                 ForeColor = Color.Gray,
-                ImeMode = ImeMode.NoControl
+                ImeMode = ImeMode.NoControl,
+                TabStop = false // tránh form tự focus vào đây lúc load, xóa mất placeholder
             };
 
             // Placeholder dùng bool — không check ForeColor, tránh can thiệp IME tiếng Việt
